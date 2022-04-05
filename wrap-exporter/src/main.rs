@@ -55,6 +55,6 @@ async fn main() {
     // set the provide into otel context
     opentelemetry::global::set_tracer_provider(provider);
 
-    let _test_tracer = opentelemetry::global::tracer("test_tracer"); // the `resource` tag will be test_tracer
-    let _dependency_tracer = opentelemetry::global::tracer("dependency_tracer"); // the `resource` tag will be dependency_tracer
+    let _test_tracer = opentelemetry::global::tracer("test_tracer"); // the `name` tag will be test_tracer
+    let _dependency_tracer = opentelemetry::global::tracer("dependency_tracer"); // the `name` tag will be dependency_tracer
 }
