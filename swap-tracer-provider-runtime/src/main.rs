@@ -2,16 +2,16 @@ use anyhow::Result;
 use opentelemetry::runtime;
 use opentelemetry::sdk::{trace, Resource};
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_semantic_conventions::resource;
-use std::sync::Arc;
+
 use opentelemetry::trace::noop::NoopTracer;
+use std::sync::Arc;
 use tracing::{error, Level, Subscriber};
-use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::registry::LookupSpan;
-use tracing_subscriber::{reload, Layer};
+
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::{reload, Layer};
 
 pub struct TracingToggle {
     enable: Box<dyn Fn(String) -> Result<()> + Send + Sync + 'static>,
@@ -39,10 +39,7 @@ where
 
     let _ = opentelemetry_otlp::new_pipeline()
         .tracing()
-        .with_exporter(
-            opentelemetry_otlp::new_exporter()
-                .tonic()
-        )
+        .with_exporter(opentelemetry_otlp::new_exporter().tonic())
         .install_batch(runtime::Tokio)?;
 
     Ok(tracing_opentelemetry::layer().with_tracer(NoopTracer::default()))
@@ -96,10 +93,7 @@ fn init_logging_works(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
         println!("enabling tracing");
         let _ = opentelemetry_otlp::new_pipeline()
             .tracing()
-            .with_exporter(
-                opentelemetry_otlp::new_exporter()
-                    .tonic()
-            )
+            .with_exporter(opentelemetry_otlp::new_exporter().tonic())
             .install_batch(runtime::Tokio)?;
         println!("enabled tracing");
         anyhow::Ok(())
