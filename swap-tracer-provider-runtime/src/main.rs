@@ -1,0 +1,137 @@
+use anyhow::Result;
+use opentelemetry::runtime;
+use opentelemetry::sdk::{trace, Resource};
+use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_semantic_conventions::resource;
+use std::sync::Arc;
+use opentelemetry::trace::noop::NoopTracer;
+use tracing::{error, Level, Subscriber};
+use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{reload, Layer};
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+
+pub struct TracingToggle {
+    enable: Box<dyn Fn(String) -> Result<()> + Send + Sync + 'static>,
+    disable: Box<dyn Fn() -> Result<()> + Send + Sync + 'static>,
+}
+
+#[allow(clippy::missing_errors_doc)]
+impl TracingToggle {
+    pub fn enable(&self, otlp_endpoint: String) -> Result<()> {
+        (self.enable)(otlp_endpoint)
+    }
+
+    pub fn disable(&self) -> Result<()> {
+        (self.disable)()
+    }
+}
+
+fn init_tracing<S>(otlp_endpoint: String) -> Result<impl Layer<S>>
+where
+    for<'span> S: Subscriber + LookupSpan<'span>,
+{
+    opentelemetry::global::set_error_handler(|error| {
+        error!(target: "opentelemetry", ?error);
+    })?;
+
+    let _ = opentelemetry_otlp::new_pipeline()
+        .tracing()
+        .with_exporter(
+            opentelemetry_otlp::new_exporter()
+                .tonic()
+        )
+        .install_batch(runtime::Tokio)?;
+
+    Ok(tracing_opentelemetry::layer().with_tracer(NoopTracer::default()))
+}
+
+fn disable_tracing() -> Result<()> {
+    opentelemetry::global::set_error_handler(|_| {})?;
+    opentelemetry::global::shutdown_tracer_provider();
+    Ok(())
+}
+
+fn init_logging_buged(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
+    let opentelemetry = otlp_endpoint.map(init_tracing).transpose()?;
+    let (opentelemetry, handle) = reload::Layer::new(opentelemetry);
+    let handle2 = handle.clone();
+
+    let enable = move |endpoint: String| {
+        println!("enabling tracing");
+        let layer = init_tracing(endpoint)?;
+        println!("enabled tracing");
+        handle2.reload(layer)?;
+        anyhow::Ok(())
+    };
+
+    let disable = move || {
+        println!("disabling tracing");
+        opentelemetry::global::shutdown_tracer_provider();
+        println!("disabled tracing");
+        anyhow::Ok(())
+    };
+
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(opentelemetry)
+        .with(
+            Targets::new()
+                .with_target(env!("CARGO_PKG_NAME"), Level::TRACE)
+                .with_target("tower_http", Level::TRACE)
+                .with_default(Level::INFO),
+        )
+        .init();
+
+    Ok(TracingToggle {
+        enable: Box::new(enable),
+        disable: Box::new(disable),
+    })
+}
+
+fn init_logging_works(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
+    let enable = move |endpoint: String| {
+        println!("enabling tracing");
+        let _ = opentelemetry_otlp::new_pipeline()
+            .tracing()
+            .with_exporter(
+                opentelemetry_otlp::new_exporter()
+                    .tonic()
+            )
+            .install_batch(runtime::Tokio)?;
+        println!("enabled tracing");
+        anyhow::Ok(())
+    };
+
+    let disable = move || {
+        println!("disabling tracing");
+        opentelemetry::global::shutdown_tracer_provider();
+        println!("disabled tracing");
+        anyhow::Ok(())
+    };
+
+    Ok(TracingToggle {
+        enable: Box::new(enable),
+        disable: Box::new(disable),
+    })
+}
+
+#[tokio::main]
+async fn main() {
+    let toggle = Arc::new(init_logging_buged(Some("http://localhost:4197".to_string())).unwrap());
+    let toggle1 = toggle.clone();
+    let toggle2 = toggle.clone();
+
+    let enable = tokio::spawn(async move {
+        toggle1.enable("http://localhost:4317".to_string()).unwrap();
+    });
+
+    let disable = tokio::spawn(async move {
+        toggle2.disable().unwrap();
+    });
+
+    tokio::join!(enable, disable);
+    println!("Hello, world!");
+}
