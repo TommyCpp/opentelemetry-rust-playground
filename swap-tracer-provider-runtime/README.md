@@ -16,6 +16,14 @@ We further developed two function to reproduce the issue:
 - `init_logging_buged` fails to shut down tracer provider and hang forever.
 
 Potential reason: 
-- We use a sync ReadWriteLock to guard the tracer provider. Could it be we hold it across the `.await`?
-  - How to validate it?
-    - Use single thread runtime? 
+- We rule out any tracing component and what we observe is if we set the tracer provider concurrently there is a bug.
+```rust
+let _ = opentelemetry::global::set_tracer_provider(tracer_provider);
+// in another thread
+let _ = opentelemetry::global::set_tracer_provider(tracer_provider);
+
+```
+
+Observation:
+- OTLP doesn't matter here, we get the same bug using stdout exporter.
+- Build pipeline doesn't matter here, we get the same bug without pipeline

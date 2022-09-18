@@ -1,9 +1,6 @@
 use anyhow::Result;
 use opentelemetry::runtime;
 use opentelemetry::sdk::{trace, Resource};
-use opentelemetry_otlp::WithExportConfig;
-
-use opentelemetry::trace::noop::NoopTracer;
 use std::sync::Arc;
 use tracing::{error, Level, Subscriber};
 
@@ -37,12 +34,12 @@ where
         error!(target: "opentelemetry", ?error);
     })?;
 
-    let _ = opentelemetry_otlp::new_pipeline()
+    let tracer = opentelemetry_otlp::new_pipeline()
         .tracing()
         .with_exporter(opentelemetry_otlp::new_exporter().tonic())
         .install_batch(runtime::Tokio)?;
 
-    Ok(tracing_opentelemetry::layer().with_tracer(NoopTracer::default()))
+    Ok(tracing_opentelemetry::layer().with_tracer(tracer))
 }
 
 fn disable_tracing() -> Result<()> {
@@ -51,7 +48,7 @@ fn disable_tracing() -> Result<()> {
     Ok(())
 }
 
-fn init_logging_buged(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
+fn init_logging(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
     let opentelemetry = otlp_endpoint.map(init_tracing).transpose()?;
     let (opentelemetry, handle) = reload::Layer::new(opentelemetry);
     let handle2 = handle.clone();
@@ -88,44 +85,20 @@ fn init_logging_buged(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
     })
 }
 
-fn init_logging_works(otlp_endpoint: Option<String>) -> Result<TracingToggle> {
-    let enable = move |endpoint: String| {
-        println!("enabling tracing");
-        let _ = opentelemetry_otlp::new_pipeline()
-            .tracing()
-            .with_exporter(opentelemetry_otlp::new_exporter().tonic())
-            .install_batch(runtime::Tokio)?;
-        println!("enabled tracing");
-        anyhow::Ok(())
-    };
-
-    let disable = move || {
-        println!("disabling tracing");
-        opentelemetry::global::shutdown_tracer_provider();
-        println!("disabled tracing");
-        anyhow::Ok(())
-    };
-
-    Ok(TracingToggle {
-        enable: Box::new(enable),
-        disable: Box::new(disable),
-    })
-}
-
 #[tokio::main]
 async fn main() {
-    let toggle = Arc::new(init_logging_buged(Some("http://localhost:4197".to_string())).unwrap());
+    let toggle = Arc::new(init_logging(Some("http://localhost:4197".to_string())).unwrap());
     let toggle1 = toggle.clone();
     let toggle2 = toggle.clone();
 
-    let enable = tokio::spawn(async move {
+    let enable = tokio::task::spawn_blocking(move || {
         toggle1.enable("http://localhost:4317".to_string()).unwrap();
     });
 
-    let disable = tokio::spawn(async move {
+    let disable = tokio::task::spawn_blocking(move || {
         toggle2.disable().unwrap();
     });
 
     tokio::join!(enable, disable);
-    println!("Hello, world!");
+    println!("end of operations");
 }
